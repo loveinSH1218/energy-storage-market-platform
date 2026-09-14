@@ -1,0 +1,1 @@
+"""Contract tests for market, strategy, and storage interfaces."""

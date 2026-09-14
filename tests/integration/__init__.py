@@ -1,0 +1,1 @@
+"""Integration tests for coupled market-strategy-storage workflows."""
