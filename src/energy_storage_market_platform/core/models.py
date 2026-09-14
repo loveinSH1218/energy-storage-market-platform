@@ -46,6 +46,20 @@ class StorageState(PlatformModel):
         le=1,
         description="State of health normalized to the inclusive range [0, 1].",
     )
+    soh_Q: float | None = Field(
+        default=None,
+        ge=0,
+        le=1,
+        description="Capacity state of health from a backend, when available.",
+    )
+    soh_R: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Resistance state-of-health factor from a backend, when available. "
+            "SimSES defines this as a resistance multiplier and it may exceed 1."
+        ),
+    )
     power_kw: float = Field(
         description=(
             "Current storage power in kW; positive discharges to the grid and "
@@ -98,7 +112,22 @@ class StorageStepResult(PlatformModel):
             "negative is import."
         ),
     )
+    losses_kwh: float = Field(
+        default=0.0,
+        ge=0,
+        description="Physical losses reported by the storage backend in kWh.",
+    )
     state: StorageState = Field(description="Storage state after execution.")
+
+    @property
+    def actual_power_kw(self) -> float:
+        """Alias for the applied power using the platform terminology."""
+        return self.applied_power_kw
+
+    @property
+    def energy_delta_kwh(self) -> float:
+        """Alias for net energy exchanged with the grid."""
+        return self.energy_to_grid_kwh
 
 
 class TradeResult(PlatformModel):
