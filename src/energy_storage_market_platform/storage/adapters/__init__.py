@@ -1,6 +1,7 @@
 """Adapters for concrete storage backends."""
 
 from .simses import (
+    SimSESAssetRealization,
     SimSESConverterConfig,
     SimSESStorageAdapter,
     SimSESStorageConfig,
@@ -8,6 +9,7 @@ from .simses import (
 )
 
 __all__ = [
+    "SimSESAssetRealization",
     "SimSESConverterConfig",
     "SimSESStorageAdapter",
     "SimSESStorageConfig",

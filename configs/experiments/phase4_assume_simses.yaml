@@ -1,0 +1,10 @@
+asset:
+  config: ../assets/bess_100mw_2h.yaml
+market:
+  backend: assume
+strategy:
+  backend: assume_native
+storage:
+  backend: simses
+simulation:
+  physical_substep_seconds: 60

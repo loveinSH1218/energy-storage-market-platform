@@ -1,0 +1,11 @@
+asset:
+  id: bess_100mw_2h
+  technology: lfp
+  rated_power_mw: 100
+  duration_hours: 2
+  min_soc: 0.10
+  max_soc: 0.90
+  initial_soc: 0.50
+  max_charge_power_mw: 100
+  max_discharge_power_mw: 100
+  initial_temperature_c: 25

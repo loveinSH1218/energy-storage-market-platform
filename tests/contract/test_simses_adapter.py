@@ -7,6 +7,7 @@ import pytest
 
 from energy_storage_market_platform.core import (
     DispatchRequest,
+    StorageAssetSpec,
     StorageBackend,
     StorageState,
 )
@@ -27,9 +28,20 @@ def make_adapter(
     converter: SimSESConverterConfig | None = None,
 ) -> SimSESStorageAdapter:
     return SimSESStorageAdapter(
-        config=SimSESStorageConfig(
+        asset_spec=StorageAssetSpec(
+            asset_id="test-bess",
+            technology="lfp",
+            rated_power_kw=2.0,
+            energy_capacity_kwh=10.0,
+            duration_hours=5.0,
+            max_charge_power_kw=2.0,
+            max_discharge_power_kw=2.0,
+            min_soc=0.0,
+            max_soc=1.0,
             initial_soc=initial_soc,
             initial_temperature_c=25.0,
+        ),
+        config=SimSESStorageConfig(
             circuit=(13, 10),
             degradation=True,
         ),
@@ -49,9 +61,14 @@ def request(index: int, power_kw: float, dt_seconds: float = DT_SECONDS) -> Disp
 
 def test_simses_adapter_satisfies_storage_backend_and_maps_sequence() -> None:
     storage = make_adapter(
-        converter=SimSESConverterConfig(max_power_kw=2.0, efficiency=0.95),
+        converter=SimSESConverterConfig(efficiency=0.95),
     )
     assert isinstance(storage, StorageBackend)
+    assert storage.asset_spec.rated_power_kw == 2.0
+    assert storage.realization.requested_energy_capacity_kwh == 10.0
+    assert storage.realization.realized_rated_power_kw == 2.0
+    assert storage.realization.realized_energy_capacity_kwh == pytest.approx(1.248)
+    assert storage.realization.energy_sizing_error_percent < 0.0
 
     initial_state = storage.current_state()
     assert isinstance(initial_state, StorageState)

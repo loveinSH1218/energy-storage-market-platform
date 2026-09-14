@@ -2,7 +2,11 @@
 
 from datetime import UTC, datetime, timedelta
 
-from energy_storage_market_platform.core import MarketObservation, StorageState
+from energy_storage_market_platform.core import (
+    MarketObservation,
+    StorageAssetSpec,
+    StorageState,
+)
 from energy_storage_market_platform.coupling import run_simulation
 from energy_storage_market_platform.market.dummy import DummyMarket
 from energy_storage_market_platform.storage.ideal import IdealStorage
@@ -25,7 +29,19 @@ def test_dummy_market_strategy_coupling_and_ideal_storage() -> None:
             currency="EUR",
         ),
     ]
+    storage_asset = StorageAssetSpec(
+        asset_id="dummy-storage",
+        technology="ideal",
+        rated_power_kw=1.0,
+        energy_capacity_kwh=10.0,
+        duration_hours=10.0,
+        min_soc=0.0,
+        max_soc=1.0,
+        initial_soc=0.5,
+        initial_temperature_c=25.0,
+    )
     storage = IdealStorage(
+        asset_spec=storage_asset,
         initial_state=StorageState(
             timestamp=start,
             soc=0.5,
@@ -33,7 +49,6 @@ def test_dummy_market_strategy_coupling_and_ideal_storage() -> None:
             power_kw=0.0,
             energy_capacity_kwh=10.0,
         ),
-        max_power_kw=1.0,
     )
 
     results = run_simulation(
@@ -41,6 +56,7 @@ def test_dummy_market_strategy_coupling_and_ideal_storage() -> None:
         strategy=SimpleTradingStrategy(
             price_threshold_per_kwh=0.15,
             power_kw=1.0,
+            asset_spec=storage_asset,
         ),
         storage=storage,
         start=start,

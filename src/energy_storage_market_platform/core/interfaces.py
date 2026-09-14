@@ -7,6 +7,7 @@ from typing import Protocol, runtime_checkable
 from .models import (
     DispatchRequest,
     MarketObservation,
+    StorageAssetSpec,
     StorageState,
     StorageStepResult,
 )
@@ -28,6 +29,8 @@ class MarketBackend(Protocol):
 class TradingStrategy(Protocol):
     """Decision maker that never controls a concrete storage implementation."""
 
+    asset_spec: StorageAssetSpec
+
     def decide(
         self,
         market_observation: MarketObservation,
@@ -39,6 +42,8 @@ class TradingStrategy(Protocol):
 @runtime_checkable
 class StorageBackend(Protocol):
     """Executor of normalized dispatch requests."""
+
+    asset_spec: StorageAssetSpec
 
     def current_state(self) -> StorageState:
         """Return the latest observable storage state."""

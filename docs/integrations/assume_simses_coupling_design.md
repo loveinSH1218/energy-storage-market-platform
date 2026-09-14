@@ -2,8 +2,9 @@
 
 ## Status and design objective
 
-This document is a design proposal only. No platform source code, interfaces,
-configuration, or dependencies were modified in this audit.
+This document remains a design proposal for ASSUME-to-SimSES dispatch. Phase
+3.5 adds only static asset specification and strategy-selection infrastructure;
+ASSUME-to-SimSES dispatch is still not implemented.
 
 The smallest safe architecture keeps the two upstream projects independent:
 
@@ -27,6 +28,12 @@ ASSUME remains responsible for market products, bidding, clearing, and
 settlement. SimSES remains responsible for battery electrical behavior,
 converter behavior, temperature, and aging. The platform owns only the
 translation and orchestration.
+
+Static asset sizing is a separate platform concern: `StorageAssetSpec` is the
+single source of truth for requested power, energy, SOC limits, and initial
+state. ASSUME and SimSES adapters consume that object. SimSES remains the
+source of truth for dynamic physical behavior, while ASSUME remains the source
+of truth for market clearing and settlement.
 
 ## Proposed adapter responsibilities
 
@@ -164,12 +171,14 @@ choose one owner.
 The lowest-risk first milestone is a settled-schedule co-simulation:
 
 1. Run an ASSUME market scenario with a storage-capable participant.
-2. Capture the accepted orderbook and clearing metadata at each settlement.
-3. Convert each accepted order into a platform `DispatchRequest`.
-4. Execute that request in SimSES, using smaller physical substeps when
+2. Load one `StorageAssetSpec` and pass it to the ASSUME adapter, strategy,
+   SimSES adapter, and coupling validation.
+3. Capture the accepted orderbook and clearing metadata at each settlement.
+4. Convert each accepted order into a platform `DispatchRequest`.
+5. Execute that request in SimSES, using smaller physical substeps when
    configured.
-5. Record both ASSUME settlement data and SimSES actual physical outputs.
-6. Compare scheduled versus actual power, SOC, and energy accounting.
+6. Record both ASSUME settlement data and SimSES actual physical outputs.
+7. Compare scheduled versus actual power, SOC, and energy accounting.
 
 This milestone should not claim that ASSUME's native storage model and SimSES
 are equivalent. It characterizes the difference between the market schedule
@@ -214,6 +223,12 @@ ASSUME examples configure `volume_unit: MWh`, while the storage dispatch code
 uses time-indexed power-like values in MW and multiplies by duration. The
 one-hour example hides this issue. Multi-hour products require an explicit
 normalization rule before SimSES is called.
+
+The Phase 3 adapter therefore takes an explicit `volume_semantics` setting.
+For the official storage result shape this is `power`: an order volume in MW
+is converted to platform kW and interval energy is derived from duration. A
+configuration label such as `volume_unit: MWh` is not used by itself to infer
+the numeric field's meaning.
 
 ### 3. Different capacity/efficiency ownership
 
@@ -300,4 +315,3 @@ The exact recommended integration points are:
 
 The adapter layer should stop at those boundaries. It should not copy upstream
 classes or physics into `src/energy_storage_market_platform`.
-

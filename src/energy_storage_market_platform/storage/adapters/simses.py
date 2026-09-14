@@ -19,6 +19,7 @@ from simses.thermal import AmbientThermalModel
 
 from energy_storage_market_platform.core import (
     DispatchRequest,
+    StorageAssetSpec,
     StorageState,
     StorageStepResult,
 )
@@ -29,17 +30,14 @@ SECONDS_PER_HOUR = 3_600.0
 
 @dataclass(frozen=True, slots=True)
 class SimSESStorageConfig:
-    """Configuration passed to the SimSES Battery constructor.
+    """Implementation-specific configuration for the SimSES object graph.
 
     cell_factory permits selecting another upstream cell model without copying
-    that model into the platform. The default is the official Sony LFP model
-    used by the reproduced SimSES example.
+    that model into the platform. The default circuit is an implementation
+    template, not the platform asset definition.
     """
 
-    initial_soc: float
-    initial_temperature_c: float
     circuit: tuple[int, int] = (13, 10)
-    soc_limits: tuple[float, float] = (0.0, 1.0)
     degradation: bool | None = None
     initial_soh_Q: float = 1.0
     initial_soh_R: float = 1.0
@@ -47,15 +45,8 @@ class SimSESStorageConfig:
     cell_factory: Callable[[], Any] = SonyLFP
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.initial_soc <= 1.0:
-            raise ValueError("initial_soc must be between 0 and 1")
-        if not isfinite(self.initial_temperature_c):
-            raise ValueError("initial_temperature_c must be finite")
         if len(self.circuit) != 2 or min(self.circuit) <= 0:
             raise ValueError("circuit must contain positive (series, parallel) counts")
-        soc_min, soc_max = self.soc_limits
-        if not 0.0 <= soc_min < soc_max <= 1.0:
-            raise ValueError("soc_limits must satisfy 0 <= min < max <= 1")
         if not 0.0 < self.initial_soh_Q <= 1.0:
             raise ValueError("initial_soh_Q must be in (0, 1]")
         if not 0.0 < self.initial_soh_R:
@@ -68,12 +59,9 @@ class SimSESStorageConfig:
 class SimSESConverterConfig:
     """Optional SimSES converter configuration in platform-facing units."""
 
-    max_power_kw: float
     efficiency: float | tuple[float, float] = 1.0
 
     def __post_init__(self) -> None:
-        if not isfinite(self.max_power_kw) or self.max_power_kw <= 0.0:
-            raise ValueError("max_power_kw must be positive and finite")
         efficiencies = (
             self.efficiency
             if isinstance(self.efficiency, tuple)
@@ -83,6 +71,18 @@ class SimSESConverterConfig:
             raise ValueError("converter efficiency must be in (0, 1]")
         if isinstance(self.efficiency, tuple) and len(self.efficiency) != 2:
             raise ValueError("directional efficiency must be (charge, discharge)")
+
+
+@dataclass(frozen=True, slots=True)
+class SimSESAssetRealization:
+    """Requested platform asset versus the selected SimSES realization."""
+
+    requested_rated_power_kw: float
+    requested_energy_capacity_kwh: float
+    realized_rated_power_kw: float | None
+    realized_energy_capacity_kwh: float
+    power_sizing_error_percent: float | None
+    energy_sizing_error_percent: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,31 +106,38 @@ class SimSESStorageAdapter:
 
     def __init__(
         self,
-        config: SimSESStorageConfig,
+        asset_spec: StorageAssetSpec,
         initial_timestamp: datetime,
+        config: SimSESStorageConfig | None = None,
         converter: SimSESConverterConfig | None = None,
         thermal: SimSESThermalConfig | None = None,
     ) -> None:
-        self._config = config
+        implementation = config or SimSESStorageConfig()
+        self._asset_spec = asset_spec
+        self._config = implementation
         self._battery = Battery(
-            cell=config.cell_factory(),
-            circuit=config.circuit,
+            cell=implementation.cell_factory(),
+            circuit=implementation.circuit,
             initial_states={
-                "start_soc": config.initial_soc,
-                "start_T": config.initial_temperature_c,
-                "start_soh_Q": config.initial_soh_Q,
-                "start_soh_R": config.initial_soh_R,
+                "start_soc": asset_spec.initial_soc,
+                "start_T": asset_spec.initial_temperature_c,
+                "start_soh_Q": implementation.initial_soh_Q,
+                "start_soh_R": implementation.initial_soh_R,
             },
-            soc_limits=config.soc_limits,
-            degradation=config.degradation,
-            effective_cooling_area=config.effective_cooling_area,
+            soc_limits=(asset_spec.min_soc, asset_spec.max_soc),
+            degradation=implementation.degradation,
+            effective_cooling_area=implementation.effective_cooling_area,
         )
         if converter is None:
             self._simses_storage: Any = self._battery
         else:
             self._simses_storage = Converter(
                 loss_model=FixedEfficiency(converter.efficiency),
-                max_power=converter.max_power_kw * WATTS_PER_KW,
+                max_power=max(
+                    asset_spec.max_charge_power_kw,
+                    asset_spec.max_discharge_power_kw,
+                )
+                * WATTS_PER_KW,
                 storage=self._battery,
             )
 
@@ -142,6 +149,39 @@ class SimSESStorageAdapter:
             self._thermal_model.add_component(self._battery)
 
         self._state_timestamp = initial_timestamp
+        realized_energy = self._battery.nominal_energy_capacity / WATTS_PER_KW
+        realized_power = (
+            max(asset_spec.max_charge_power_kw, asset_spec.max_discharge_power_kw)
+            if converter is not None
+            else None
+        )
+        self._realization = SimSESAssetRealization(
+            requested_rated_power_kw=asset_spec.rated_power_kw,
+            requested_energy_capacity_kwh=asset_spec.energy_capacity_kwh,
+            realized_rated_power_kw=realized_power,
+            realized_energy_capacity_kwh=realized_energy,
+            power_sizing_error_percent=(
+                None
+                if realized_power is None
+                else (realized_power / asset_spec.rated_power_kw - 1.0) * 100.0
+            ),
+            energy_sizing_error_percent=(
+                realized_energy / asset_spec.energy_capacity_kwh - 1.0
+            )
+            * 100.0,
+        )
+
+    @property
+    def asset_spec(self) -> StorageAssetSpec:
+        """Return the immutable requested platform asset specification."""
+
+        return self._asset_spec
+
+    @property
+    def realization(self) -> SimSESAssetRealization:
+        """Return transparent requested-versus-realized sizing metadata."""
+
+        return self._realization
 
     def current_state(self) -> StorageState:
         """Return a platform-only snapshot of the latest SimSES state."""
@@ -204,6 +244,7 @@ class SimSESStorageAdapter:
 
 
 __all__ = [
+    "SimSESAssetRealization",
     "SimSESConverterConfig",
     "SimSESStorageAdapter",
     "SimSESStorageConfig",

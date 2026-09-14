@@ -7,6 +7,10 @@
 `energy_storage_market_platform.storage.adapters` and returns only platform
 `StorageState` and `StorageStepResult` objects.
 
+The adapter requires the immutable platform `StorageAssetSpec`. It is the
+source of requested asset sizing and initial operating state; the SimSES
+configuration contains only implementation choices.
+
 The adapter owns a private SimSES object graph:
 
     Battery
@@ -47,27 +51,34 @@ the documented SimSES sequencing.
 
 ## Initialization
 
-`SimSESStorageConfig` maps platform initialization to SimSES as follows:
+`StorageAssetSpec` maps platform initialization to SimSES as follows:
 
 | Platform configuration | SimSES input |
 | --- | --- |
 | `initial_soc` | `initial_states["start_soc"]` |
 | `initial_temperature_c` | `initial_states["start_T"]` |
-| `initial_soh_Q` | `initial_states["start_soh_Q"]` |
-| `initial_soh_R` | `initial_states["start_soh_R"]` |
+| `min_soc`, `max_soc` | `Battery(..., soc_limits=...)` |
+
+`SimSESStorageConfig` maps implementation choices as follows:
+
+| Implementation configuration | SimSES input |
+| --- | --- |
+| `initial_soh_Q`, `initial_soh_R` | SimSES initial state values |
 | `circuit` | `Battery(..., circuit=...)` |
-| `soc_limits` | `Battery(..., soc_limits=...)` |
 | `degradation` | `Battery(..., degradation=...)` |
 | `cell_factory` | `Battery(..., cell=cell_factory())` |
+| `effective_cooling_area` | Battery constructor option |
 
-The default cell is `SonyLFP`, the default circuit is `(13, 10)` (series,
-parallel), and degradation is disabled unless explicitly set to `True` or a
+The default cell is `SonyLFP`, and the default circuit template is `(13, 10)`
+(series, parallel). This circuit is not the platform asset definition. Its
+realized size is reported explicitly below. Degradation is disabled unless explicitly set to `True` or a
 SimSES degradation model is supplied through a future extension. Initial
 temperature is required because SimSES requires `start_T`; it is not inferred
 from market data.
 
-An optional `SimSESConverterConfig` maps `max_power_kw` to the converter's
-`max_power` in W. Its efficiency is passed to SimSES `FixedEfficiency`; the
+An optional `SimSESConverterConfig` supplies converter efficiency. The
+converter `max_power` is derived from the asset's maximum charge/discharge
+capability and converted to W. Its efficiency is passed to SimSES `FixedEfficiency`; the
 adapter does not apply a second efficiency calculation.
 
 An optional `SimSESThermalConfig` constructs an `AmbientThermalModel` and
@@ -116,6 +127,23 @@ resistance multiplier and may exceed 1, so it is exposed separately and is not
 used as the generic normalized SOH. SimSES `state.loss` is reported loss
 power, which the adapter integrates over the requested seconds; no loss or SOC
 equation is recreated in platform code.
+
+## Static asset realization
+
+`SimSESStorageAdapter.realization` returns a frozen
+`SimSESAssetRealization` containing:
+
+- `requested_rated_power_kw`;
+- `requested_energy_capacity_kwh`;
+- `realized_rated_power_kw` when a converter establishes a rated boundary;
+- `realized_energy_capacity_kwh` from `Battery.nominal_energy_capacity`;
+- relative power and energy sizing errors in percent.
+
+The default SonyLFP `(13, 10)` circuit is an implementation template, not a
+100 MW / 200 MWh platform asset. Its discrete capacity mismatch is reported;
+the adapter does not optimize or silently substitute cell counts. Without a
+converter, SimSES has no single static AC rated-power field, so power
+realization and power error are explicitly unavailable.
 
 ## Timestep handling
 
